@@ -1,0 +1,51 @@
+seed: 42
+results_dir: results
+
+# Any OpenAI-compatible server (vLLM, Ollama, cloud API). The key is read from the env variable named in api_key_env.
+detector:
+  base_url: http://localhost:11434/v1
+  api_key_env: OPENAI_API_KEY
+  model: qwen2.5-coder:7b
+  temperature: 0
+  max_tokens: 500
+  max_context: 8192
+  json_mode: true
+
+attacker:
+  base_url: http://localhost:11434/v1
+  api_key_env: OPENAI_API_KEY
+  model: qwen2.5-coder:7b
+  temperature: 0.7
+  max_tokens: 700
+  max_context: 8192
+  json_mode: true
+
+run:
+  data: data/main_100.jsonl
+  configs: [A, B, C-strict, C-weak, D-all, D-selective]
+  workers: 1
+
+attack:
+  max_rounds: 20
+  budgets: [0, 1, 3, 5, 10, 20]
+  attacker_sees: explanation
+  history_window: 5
+  max_comment_chars: 1500
+
+# Only needed to rebuild the samples (python -m src.run --prepare).
+data:
+  megavul_path: data/megavul_simple.json
+  pairs_path: data/cwe476_pairs.jsonl
+  main_path: data/main_100.jsonl
+  pilot_path: data/pilot_30.jsonl
+  cppcheck_path: data/cppcheck_subset.jsonl
+  cwe: CWE-476
+  n_main: 100
+  n_pilot: 30
+  min_lines: 5
+  max_lines: 80
+
+sast:
+  cppcheck_path: tools/cppcheck/PFiles/Cppcheck/cppcheck.exe
+  args: ["--enable=warning", "--inconclusive"]
+  timeout: 60
