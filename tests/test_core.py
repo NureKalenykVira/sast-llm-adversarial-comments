@@ -1,6 +1,7 @@
+import pandas as pd
 import pytest
 
-from src import metrics
+from src import metrics, report
 from src.alerts import check_dismissal, make_alert, reference_alerts
 from src.attack import clean_comment, run_attack
 from src.code import insert_comment, lexical_spans, same_code, shift_line, strip_comments
@@ -251,6 +252,63 @@ def test_neutral_comment_is_placed_before_the_alert_line_and_cannot_change_filte
     seen.clear()
     run_control(item, FilterAll(FakeLLM({"system": remember})), CFG, lambda row: None)
     assert seen[0] == seen[1] and "TODO" not in seen[0]
+
+
+def report_frames():
+    rounds = pd.DataFrame(
+        [
+            {"id": "f1", "config": "B", "round": 0, "style": "TOOL_CPPCHECK", "verdict": "safe"},
+            {"id": "f2", "config": "B", "round": 0, "style": "TOOL_COVERITY", "verdict": "vulnerable"},
+            {"id": "f2", "config": "B", "round": 1, "style": "NOTE", "verdict": "error"},
+            {"id": "f2", "config": "B", "round": 2, "style": "NOTE", "verdict": "safe"},
+            {"id": "f1", "config": "C-strict", "round": 0, "style": "TOOL_CPPCHECK", "verdict": "vulnerable", "veto": True},
+            {"id": "f1", "config": "C-strict", "round": 1, "style": "NOTE", "verdict": "vulnerable"},
+            {"id": "f2", "config": "C-strict", "round": 0, "style": "NOTE", "verdict": "vulnerable"},
+            {"id": "f3", "config": "C-strict", "round": 0, "style": "COT", "verdict": "safe", "veto": False},
+            {"id": "f9", "config": "B", "round": 0, "attacker_error": True},
+        ]
+    )
+    attacks = pd.DataFrame(
+        [
+            {"id": "f1", "config": "B", "success_round": 0, "style": "TOOL_CPPCHECK"},
+            {"id": "f2", "config": "B", "success_round": 2, "style": "NOTE"},
+            {"id": "f1", "config": "C-strict", "success_round": None, "style": None},
+            {"id": "f2", "config": "C-strict", "success_round": None, "style": None},
+            {"id": "f3", "config": "C-strict", "success_round": 0, "style": "COT"},
+        ]
+    )
+    baseline = pd.DataFrame(
+        [
+            {"id": "f1", "config": "C-strict", "version": "fixed", "verdict": "vulnerable", "veto": True},
+            {"id": "f2", "config": "C-strict", "version": "fixed", "verdict": "safe", "veto": False},
+            {"id": "f3", "config": "C-strict", "version": "fixed", "verdict": "vulnerable"},
+        ]
+    )
+    return rounds, attacks, baseline
+
+
+def test_report_counts_styles_and_forged_cppcheck_without_invalid_rounds():
+    rounds, attacks, _ = report_frames()
+    styles = report.style_table(rounds).set_index(["configuration", "style"])
+    assert tuple(styles.loc[("B", "NOTE"), ["comments tried", "successful"]]) == (1, 1)
+    assert tuple(styles.loc[("B", "TOOL_CPPCHECK"), ["comments tried", "success rate"]]) == (1, 1.0)
+    tools = report.cppcheck_table(rounds, attacks).set_index(["configuration", "comment group"])
+    assert tools.loc[("B", "TOOL_CPPCHECK"), "share of successful attacks"] == 0.5
+    assert tools.loc[("B", "other fake tool output"), "successful"] == 0
+    assert tools.loc[("B", "other styles"), "share of successful attacks"] == 0.5
+
+
+def test_report_separates_persuaded_llm_from_veto_outcome():
+    rounds, attacks, baseline = report_frames()
+    veto = report.veto_table(baseline, rounds, attacks)["C-strict"]
+    assert veto["attacked functions"] == 3 and veto["attack rounds"] == 4
+    assert veto["rounds where the LLM dismissed the alert"] == 2 and veto["of them stopped by the veto"] == 1
+    assert veto["functions where the LLM was persuaded at least once"] == 2
+    assert veto["functions where the veto held to the end"] == 1
+    assert veto["share: LLM persuaded, veto held"] == 0.333
+    assert veto["ASR without the veto (same comments)"] == 0.667 and veto["ASR with the veto"] == 0.333
+    assert veto["fixed versions: correct dismissals by the LLM"] == 2
+    assert veto["of them rejected by the veto (false positives kept)"] == 1
 
 
 def test_style_name_is_removed_from_the_comment_text():

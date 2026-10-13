@@ -86,14 +86,22 @@ def table(summary):
     return "\n".join(lines)
 
 
-def plot_asr(summary, path):
-    import matplotlib
+COLORS = {"A": "#2a78d6", "B": "#eb6834", "C-strict": "#1baf7a", "C-weak": "#eda100", "D-all": "#e87ba4", "D-selective": "#008300"}
+MARKERS = {"A": "o", "B": "s", "C-strict": "^", "C-weak": "v", "D-all": "D", "D-selective": "P"}
+INK, MUTED = "#0b0b0b", "#898781"
 
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=(8.5, 4.2))
-    for name, c in summary["configs"].items():
+def style_axes(ax):
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.spines[["left", "bottom"]].set_color(MUTED)
+    ax.tick_params(colors=MUTED, labelcolor=INK)
+    ax.grid(axis="y", color=MUTED, alpha=0.25, linewidth=0.6)
+    ax.set_axisbelow(True)
+
+
+def draw_asr(summary, ax):
+    count = len(summary["configs"])
+    for position, (name, c) in enumerate(summary["configs"].items()):
         curve = [row for row in c["asr_curve"] if row["asr"] is not None]
         if not curve:
             continue
@@ -101,17 +109,37 @@ def plot_asr(summary, path):
         y = [row["asr"] for row in curve]
         low = [row["asr"] - row["asr_ci"][0] for row in curve]
         high = [row["asr_ci"][1] - row["asr"] for row in curve]
-        drawn = ax.errorbar(x, y, yerr=[low, high], marker="o", capsize=3, label=f"{name} (n={curve[0]['targets']})")
+        color = COLORS.get(name, INK)
+        shift = (position - (count - 1) / 2) * 0.07
+        ax.errorbar(
+            [value + shift for value in x], y, yerr=[low, high], color=color, marker=MARKERS.get(name, "o"), markersize=7, linewidth=2,
+            elinewidth=1, capsize=3, markeredgecolor="white", markeredgewidth=1, label=f"{name} (n={curve[0]['targets']})",
+        )
         if c["control"]["flip_rate"] is not None:
-            ax.axhline(c["control"]["flip_rate"], color=drawn.lines[0].get_color(), linestyle="--", linewidth=1)
+            ax.axhline(c["control"]["flip_rate"], color=color, linestyle="--", linewidth=1)
         ax.set_xticks(x)
-    ax.plot([], [], color="gray", linestyle="--", linewidth=1, label="control flip rate\n(neutral comment)")
+    ax.plot([], [], color=MUTED, linestyle="--", linewidth=1, label="control flip rate\n(neutral comment)")
     ax.set_xlabel("Round budget R")
     ax.set_ylabel("Attack success rate (95% Wilson CI)")
     ax.set_ylim(-0.03, 1.03)
-    ax.set_title(f"Detector: {summary['detector_model']}, attacker: {summary['attacker_model']}")
-    ax.grid(alpha=0.3)
-    ax.legend(title="Configuration", loc="center left", bbox_to_anchor=(1.02, 0.5))
+    ax.set_title(f"Detector: {summary['detector_model']}, attacker: {summary['attacker_model']}", color=INK)
+    style_axes(ax)
+    handles, labels = ax.get_legend_handles_labels()
+    order = sorted(range(len(labels)), key=lambda i: labels[i].startswith("control"))
+    ax.legend(
+        [handles[i] for i in order], [labels[i] for i in order],
+        title="Configuration", loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False,
+    )
+
+
+def plot_asr(summary, path):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(8.5, 4.2))
+    draw_asr(summary, ax)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)

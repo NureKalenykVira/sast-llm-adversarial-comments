@@ -64,13 +64,14 @@ instead of letting the server truncate it silently; `max_context` must match the
 them in parallel only when started with `OLLAMA_NUM_PARALLEL=N` (each parallel slot needs its own context
 memory); otherwise use `--workers 1`.
 
-### 2. Three launches
+### 2. Launches: three steps and one optional
 
 | Step | Command | What it does | Requests (upper bound) | Rough time, 3 s per request, 8 workers |
 |---|---|---|---|---|
 | check | `python -m src.run --name check --limit 2 --max-rounds 1` | 2 pairs, 1 feedback round: shows that the setup works | about 90 | 1-2 minutes |
 | pilot | `python -m src.run --name pilot --data data/pilot_30.jsonl --workers 8` | 30 pairs, 20 rounds | about 7 500 | up to 45 minutes |
 | main | `python -m src.run --name main --workers 8` | 100 pairs (`data/main_100.jsonl`), 20 rounds | about 25 000 | up to 2.5 hours |
+| cppcheck (optional) | `python -m src.run --name cppcheck --data data/cppcheck_subset.jsonl --workers 8` | 15 pairs with real Cppcheck alerts, 20 rounds | about 3 700 | up to 25 minutes |
 
 With one worker multiply the time by 8. The time depends on the hardware and the model; the pilot shows
 the real speed.
@@ -78,6 +79,14 @@ the real speed.
 **Please send `results/pilot/summary.json` before starting the main run**, so that the pilot numbers can be
 checked first. Answers of the pilot stay in the cache, and its 30 pairs are the first 30 of the main sample,
 so the main run does not repeat these requests.
+
+**Step 4 is optional.** It repeats the experiment on the 15 function pairs for which the real Cppcheck 2.22
+reports a NULL dereference on the vulnerable version and nothing on the fixed one (see "Data"). The alerts
+are stored in the data file, so Cppcheck does not have to be installed. It can be started at any time after
+the check, independently of the pilot and the main run. On the fixed versions there is no alert, so the
+triage configurations send no requests for them and their precision is 1 by construction; the result of
+interest is the ASR on real alerts. **Please send the whole `results/cppcheck/` folder** (or at least
+`summary.json`, `rounds.jsonl` and `attacks.jsonl`).
 
 **If a run is interrupted**, launch the same command again: finished functions are skipped and model
 answers are taken from the cache (`results/cache.sqlite`), so nothing is paid for twice.
@@ -125,8 +134,19 @@ Everything is written to `results/<name>/`:
 | `control.jsonl` | verdicts after inserting neutral comments (see below) |
 | `config.json` | settings of the run |
 
-A summary table is also printed at the end. `notebooks/pilot.ipynb` shows the same results as tables and a plot.
-To share the results, send the whole `results/<name>/` folder.
+A summary table is also printed at the end. To share the results, send the whole `results/<name>/` folder.
+
+### Tables and figures for the paper
+
+`notebooks/pilot.ipynb` builds everything from `summary.json` and the logs of one run, without any model
+requests: the metrics of the six configurations, ASR(R) with the control lines, success of comment styles,
+forged Cppcheck output against the real alert (`TOOL_CPPCHECK`), and the share of functions where the LLM
+was persuaded but the veto held. Set `RUN_NAME` in the first cell (or the environment variable `RUN_NAME`).
+Tables are saved as CSV and figures as PNG and PDF to `results/<name>/paper/`. Without opening Jupyter:
+
+```bash
+RUN_NAME=main python -m jupyter nbconvert --to notebook --execute notebooks/pilot.ipynb --output executed.ipynb
+```
 
 ### How ASR(R) is computed
 
@@ -160,11 +180,7 @@ dereference); the sample is drawn from these 192 with a fixed seed.
 
 **Supplementary experiment with real Cppcheck alerts.** `data/cppcheck_subset.jsonl` holds the 15 pairs for
 which Cppcheck 2.22 reports a NULL dereference on the vulnerable version and nothing on the fixed one.
-The alerts are stored in the file, so Cppcheck is not needed to run it:
-
-```bash
-python -m src.run --name cppcheck --data data/cppcheck_subset.jsonl --workers 8
-```
+The alerts are stored in the file, so Cppcheck is not needed to run it (step 4 of the launches above).
 
 `data/sample.jsonl` holds three toy pairs for quick checks.
 
